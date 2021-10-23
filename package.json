@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").start()'",
+    "rebuild_legacy_wallets": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").rebuildLegacyWalletProfiles()'"
   },
   "repository": {
     "type": "git",
@@ -15,5 +17,11 @@
   "bugs": {
     "url": "https://github.com/kwliang1/mutant-dao/issues"
   },
-  "homepage": "https://github.com/kwliang1/mutant-dao#readme"
+  "homepage": "https://github.com/kwliang1/mutant-dao#readme",
+  "dependencies": {
+    "loglevel": "^1.7.1",
+    "loglevel-plugin-prefix": "^0.8.4",
+    "mongodb": "^4.1.3",
+    "web3": "^1.6.0"
+  }
 }
