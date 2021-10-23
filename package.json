@@ -1,0 +1,19 @@
+{
+  "name": "mutant-dao",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kwliang1/mutant-dao.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kwliang1/mutant-dao/issues"
+  },
+  "homepage": "https://github.com/kwliang1/mutant-dao#readme"
+}
