@@ -6,7 +6,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").start()'",
-    "rebuild_legacy_wallets": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").rebuildLegacyWalletProfiles()'"
+    "rebuild_legacy_wallets": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").rebuildLegacyWalletProfiles()'",
+    "rebuild_new_wallets": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").rebuildNewWalletProfiles()'",
+    "calc_rewards": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").calculateFishRewardsForWallets()'",
+    "print_rewards": "/home/kevin/.nvm/versions/node/v14.18.0/bin/node -e 'require(\"./fish-rewards/app\").printWalletRewardsResults()'"
   },
   "repository": {
     "type": "git",

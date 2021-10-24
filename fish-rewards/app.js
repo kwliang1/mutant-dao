@@ -3,6 +3,7 @@ const web3 = new Web3('https://eth-mainnet.alchemyapi.io/v2/fH3RqImWKcY75pC03EOu
 const db = require("../db");
 const utils = require("../utils");
 const {logger: log} = require("../utils");
+const fs = require("fs");
 const appLoggingTag = `[FISH-REWARDS]`;
 
 const getLatestEvent = async ({num = 1} = {}) => {
@@ -203,39 +204,82 @@ const rebuildWalletProfiles = async ({address = '0xaAdBA140Ae5e4c8a9eF0Cc86EA312
 	}
 }
 
-const compareLegacyContractStakersToCurrentStakers = async ({} = {}) => {
+const calculateFishRewardsForWallets = async ({} = {}) => {
 	const loggingTag = `${appLoggingTag}[compareLegacyContractStakersToCurrentStakers]`;
 	try{
 		const dbClient = await db.init({name: db.name});
 		try{
-			let legacyContractWalletCollection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.legacy_contract_wallets}});
-			const legacyWalletCursor = await legacyContractWalletCollection.find(),
-				arrayOfLegacyWalletAddresses = [];
-			while(await legacyWalletCursor.hasNext()) {
-				const wallet = await legacyWalletCursor.next();
-				if(arrayOfLegacyWalletAddresses.indexOf(wallet.address) < 0){
-					arrayOfLegacyWalletAddresses.push(wallet.address);
-				}
-			}
 			
 			let newContractWalletCollection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.new_contract_wallets}});
-			const newWalletCursor = await newContractWalletCollection.find();
+			const newWalletCursor = await newContractWalletCollection.find(),
+				newStakingContractWalletAddressMap = {},
+				arrayOfNewStakingContractWalletAddresses = [];
 			
 			while(await newWalletCursor.hasNext()) {
 				const wallet = await newWalletCursor.next();
-				if(arrayOfLegacyWalletAddresses.indexOf(wallet.address) > -1){
+				if(!(wallet.address in newStakingContractWalletAddressMap)){//address not already in array
+					let tokenStakingMap = wallet.token_staking_status_map,
+						tokensOwned = Object.keys(tokenStakingMap);
+					
+					for(let i = 0; i < tokensOwned.length; i++){
+						const latestNewStakingTransferEvent = "latest_stake_event" in tokenStakingMap[tokensOwned[i]] ? tokenStakingMap[tokensOwned[i]].latest_stake_event : {},
+							latestNewUnStakingTransferEvent = "latest_unstake_event" in tokenStakingMap[tokensOwned[i]] ? tokenStakingMap[tokensOwned[i]].latest_unstake_event : {};
+						if(
+							(typeof latestNewStakingTransferEvent.blockNumber === "number") &&//user has staked to the new contract
+							(
+								(typeof latestNewUnStakingTransferEvent.blockNumber === "undefined") ||//user has not unstaked from the new contract	
+								(latestNewUnStakingTransferEvent.blockNumber < latestNewStakingTransferEvent.blockNumber)
+							)
+						){
+							arrayOfNewStakingContractWalletAddresses.push(wallet.address);
+						}
+					}
+					// arrayOfNewStakingContractWalletAddresses[wallet.address];
+				}
+			}
+			
+			let legacyContractWalletCollection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.legacy_contract_wallets}});
+			const legacyWalletCursor = await legacyContractWalletCollection.find();
+			
+			while(await legacyWalletCursor.hasNext()) {
+				const wallet = await legacyWalletCursor.next();
+				
+				if(arrayOfNewStakingContractWalletAddresses.indexOf(wallet.address) > -1){
 					console.info(`${loggingTag} wallet address: "${wallet.address}" previously staked! calculating rewards based on currently staked cats...`);
 					
 					const legacyContractRewardsPausedBlockNum = 13418720,
 						newContractRewardsUnpausedBlockNum = 13432911,
 						numBlockPerDay = 6000,
-						rewardsRatePerFish = ((newContractRewardsUnpausedBlockNum - legacyContractRewardsPausedBlockNum)/numBlockPerDay);
+						rewardsRatePerFish = ((newContractRewardsUnpausedBlockNum - legacyContractRewardsPausedBlockNum)/numBlockPerDay),
+						dailyNumFish = 10,
+						numEligibleTokens = async ({wallet} = {}) => {
+							let num = 0;
+							try{
+								let tokenStakingMap = wallet.token_staking_status_map,
+									tokensOwned = Object.keys(tokenStakingMap);
+								
+								for(let i = 0; i < tokensOwned.length; i++){
+									const latestLegacyStakingTransferEvent = tokenStakingMap[tokensOwned[i]].latest_stake_event,
+										latestLegacyUnStakingTransferEvent = tokenStakingMap[tokensOwned[i]].latest_unstake_event;
+									if(
+										(typeof latestLegacyStakingTransferEvent.blockNumber === "number" && latestLegacyStakingTransferEvent.blockNumber <= legacyContractRewardsPausedBlockNum)&&//user was staked before the rewards were paused
+										(typeof latestLegacyUnStakingTransferEvent.blockNumber === "number" && latestLegacyUnStakingTransferEvent.blockNumber >= legacyContractRewardsPausedBlockNum)//user's latest unstake event from the contract is AFTER the rewards were paused
+									){
+										num++;
+									}
+								}
+								
+							} catch(e){
+								console.error(`${loggingTag} Error`, e);
+							}
+							return num;
+						};
 					
-					await newContractWalletCollection.update({
+					await legacyContractWalletCollection.update({
 						address: wallet.address
 					},{
 						$set:{
-							num_fish_rewards: (10 * wallet.num_tokens * rewardsRatePerFish)
+							num_fish_rewards: (dailyNumFish * await numEligibleTokens({wallet}) * rewardsRatePerFish)
 						}
 					});
 				}
@@ -284,6 +328,38 @@ const rebuildWalletsCollection = async ({events = [], address, collection_name:c
 		throw e;
 	} finally {
 	
+	}
+}
+
+const printWalletRewardsResults = async ({} = {}) => {
+	const loggingTag = `${appLoggingTag}[printWalletRewardsResults]`;
+	const dbClient = await db.init({name: db.name});
+	try{
+		try{
+			
+			let legacyContractWalletCollection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.legacy_contract_wallets}});
+			const legacyWalletCursor = await legacyContractWalletCollection.find({num_fish_rewards:{$exists:true}}).sort({num_fish_rewards: -1});
+			let walletsJSONArray = [];
+			while(await legacyWalletCursor.hasNext()) {
+				const wallet = await legacyWalletCursor.next();
+				walletsJSONArray.push(wallet);
+			}
+			
+			try{
+				const data = JSON.stringify(walletsJSONArray);
+				await fs.writeFileSync(`./rewards-list-${new Date().getTime()}.json`, data);
+				console.info(`${loggingTag} successfully wrote json to disk!`);
+			} catch(e){
+				console.error(`${loggingTag} error writing data to json file`, e);
+			}
+			
+		} catch(e){
+			console.error(`${loggingTag} Error querying events`, e);
+		} finally {
+			db.close({client: dbClient});
+		}
+	} catch(e){
+		console.error(`${loggingTag} Error:`, e);
 	}
 }
 
@@ -581,7 +657,14 @@ const rebuildLegacyWalletProfiles = async ({} ={}) => {
 	await rebuildWalletProfiles({staking_wallet_address:"0xb2F43262FC23d253538ca5F7b4890f89F0EE95D9"});
 }
 
+const rebuildNewWalletProfiles = async ({} = {}) => {
+	await rebuildWalletProfiles({is_legacy: false, staking_wallet_address: "0xd09656a2EE7E5Ee3404fAce234e683D3337dA014"});//recursively call itself
+}
+
 module.exports = {
 	start: getAllEvents,
-	rebuildLegacyWalletProfiles
+	rebuildLegacyWalletProfiles,
+	rebuildNewWalletProfiles,
+	calculateFishRewardsForWallets,
+	printWalletRewardsResults,
 }
