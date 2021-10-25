@@ -226,13 +226,14 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 					for(let i = 0; i < tokensOwned.length; i++){
 						const latestNewStakingTransferEvent = "latest_stake_event" in tokenStakingMap[tokensOwned[i]] ? tokenStakingMap[tokensOwned[i]].latest_stake_event : {},
 							latestNewUnStakingTransferEvent = "latest_unstake_event" in tokenStakingMap[tokensOwned[i]] ? tokenStakingMap[tokensOwned[i]].latest_unstake_event : {};
-						if(
-							(typeof latestNewStakingTransferEvent.blockNumber === "number") &&//user has staked to the new contract
-							(
-								(typeof latestNewUnStakingTransferEvent.blockNumber === "undefined") ||//user has not unstaked from the new contract	
-								(latestNewUnStakingTransferEvent.blockNumber < latestNewStakingTransferEvent.blockNumber)
-							)
-						){
+						// if(
+						// 	(typeof latestNewStakingTransferEvent.blockNumber === "number") &&//user has staked to the new contract
+						// 	(
+						// 		(typeof latestNewUnStakingTransferEvent.blockNumber === "undefined") ||//user has not unstaked from the new contract
+						// 		(latestNewUnStakingTransferEvent.blockNumber < latestNewStakingTransferEvent.blockNumber)
+						// 	)
+						// ){
+						if(typeof latestNewStakingTransferEvent.blockNumber === "number"){//user has staked to the new contract
 							arrayOfNewStakingContractWalletAddresses.push(wallet.address);
 							newStakingContractWalletAddressMap[wallet.address] = wallet;
 						}
@@ -244,8 +245,8 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 			let legacyContractWalletCollection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.legacy_contract_wallets}});
 			const legacyWalletCursor = await legacyContractWalletCollection.find().sort({num_tokens: 1});
 			
-			let numMigrated = 0,
-				numEligible = 0,
+			let numEligible = 0,
+				numMigrated = 0,
 				totalTokens = 0;
 			while(await legacyWalletCursor.hasNext()) {
 				const wallet = await legacyWalletCursor.next();
@@ -257,6 +258,7 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 						const loggingTag = `${appLoggingTag}[calculateRewards]`;
 						let rewards = {
 							bonus: false,
+							num_migrated_to_new_contract: 0,
 							amount: 0
 						};
 						try{
@@ -302,6 +304,7 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 										(typeof stakingStatusForThisToken.new.latest_stake_event !== "undefined")
 									){
 										numMigrated++;
+										rewards.num_migrated_to_new_contract++;
 										rewards.bonus = true;//setting a boolean flag for the MC team to decide on the bonus amount
 									} else {
 										console.info(`${loggingTag}[id: "${tokenID}"] not migrated!`, stakingStatusForThisToken.new);
@@ -333,6 +336,7 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 						$set:{
 							// num_fish_rewards: (dailyNumFish * await numEligibleTokens({wallet}) * rewardsRatePerFish)
 							bonus_fish: rewards.bonus,
+							num_tokens_staked_in_new_contract: rewards.num_migrated_to_new_contract,
 							num_fish_rewards: rewards.amount
 						}
 					});
@@ -402,7 +406,7 @@ const printWalletRewardsResults = async ({} = {}) => {
 			
 			try{
 				const data = JSON.stringify(walletsJSONArray);
-				await fs.writeFileSync(`./rewards-list-${new Date().getTime()}.json`, data);
+				await fs.writeFileSync(`./outputs/rewards-list-${new Date().getTime()}.json`, data);
 				console.info(`${loggingTag} successfully wrote json to disk!`);
 			} catch(e){
 				console.error(`${loggingTag} error writing data to json file`, e);
