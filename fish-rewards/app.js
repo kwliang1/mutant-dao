@@ -80,7 +80,7 @@ const getAllEvents = async ({id='mutantcats', address:contractAddress='0xaAdBA14
 		await rebuildWalletProfiles({is_legacy: false, staking_wallet_address: "0xd09656a2EE7E5Ee3404fAce234e683D3337dA014"});//recursively call itself
 		
 		//update the rewards for wallet profiles staked in new contract
-		// await compareLegacyContractStakersToCurrentStakers();
+		await calculateFishRewardsForWallets();
 		
 	} catch(e){
 		console.error(`${loggingTag} error:`, e);
@@ -244,6 +244,9 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 			let legacyContractWalletCollection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.legacy_contract_wallets}});
 			const legacyWalletCursor = await legacyContractWalletCollection.find().sort({num_tokens: 1});
 			
+			let numMigrated = 0,
+				numEligible = 0,
+				totalTokens = 0;
 			while(await legacyWalletCursor.hasNext()) {
 				const wallet = await legacyWalletCursor.next();
 				
@@ -252,7 +255,10 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 					
 					const calculateRewards = async ({legacy_wallet:legacyWallet, new_wallet:newContractStakingWallet} = {}) => {
 						const loggingTag = `${appLoggingTag}[calculateRewards]`;
-						let rewards = 0;
+						let rewards = {
+							bonus: false,
+							amount: 0
+						};
 						try{
 							const tokensOwned = "tokens_owned" in legacyWallet ? legacyWallet.tokens_owned : [];
 							
@@ -290,8 +296,19 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 									tokenIsEligible = await checkTokenEligibility({staking_status:stakingStatusForThisToken.legacy});
 								
 								if(tokenIsEligible){
-									rewards = rewards + (dailyNumFish * rewardsRatePerFish({newContractStaking: stakingStatusForThisToken.new}));
+									numEligible++;
+									if(
+										(typeof stakingStatusForThisToken.new === "object") &&
+										(typeof stakingStatusForThisToken.new.latest_stake_event !== "undefined")
+									){
+										numMigrated++;
+										rewards.bonus = true;//setting a boolean flag for the MC team to decide on the bonus amount
+									} else {
+										console.info(`${loggingTag}[id: "${tokenID}"] not migrated!`, stakingStatusForThisToken.new);
+									}
+									rewards.amount = rewards.amount + (dailyNumFish * rewardsRatePerFish({newContractStaking: stakingStatusForThisToken.new}));
 								}
+								totalTokens++;
 								
 							}
 							
@@ -305,19 +322,22 @@ const calculateFishRewardsForWallets = async ({} = {}) => {
 					// 	legacy_wallet:wallet,
 					// 	new_wallet: newStakingContractWalletAddressMap[wallet.address]
 					// }));
+					const rewards = await calculateRewards({
+						legacy_wallet:wallet,
+						new_wallet: newStakingContractWalletAddressMap[wallet.address]
+					});
 					
 					await legacyContractWalletCollection.update({
 						address: wallet.address
 					},{
 						$set:{
 							// num_fish_rewards: (dailyNumFish * await numEligibleTokens({wallet}) * rewardsRatePerFish)
-							num_fish_rewards: await calculateRewards({
-								legacy_wallet:wallet,
-								new_wallet: newStakingContractWalletAddressMap[wallet.address]
-							})
+							bonus_fish: rewards.bonus,
+							num_fish_rewards: rewards.amount
 						}
 					});
 				}
+				console.info(`${loggingTag} # migrated:${numMigrated}, # eligible: ${numEligible}, total: ${totalTokens}`);
 			// }
 			
 		} catch(e){
@@ -599,7 +619,7 @@ const getLatestStakingTransferOfTokenFromAnAddress = async ({token_id:tokenID = 
 		// 	const collection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.mutantdao}});
 			// example event
 			// {event: "Transfer", "returnValues.from":"0x35f80420bbDB358b6bf274038aeD03B49235E9fC", "returnValues.to":"0xd09656a2EE7E5Ee3404fAce234e683D3337dA014"}
-			const cursor = await collection.find({event: "Transfer", "returnValues.from":walletAddress, "returnValues.to":stakingWalletAddress}).sort({blockNumber: -1}).limit(1);
+			const cursor = await collection.find({event: "Transfer", "returnValues.from":walletAddress, "returnValues.to":stakingWalletAddress, "returnValues.tokenId":tokenID}).sort({blockNumber: -1}).limit(1);
 			while(await cursor.hasNext()){
 				transfer = await cursor.next()
 				// log.info(`${loggingTag}[count:${await cursor.count()}] event:`, sale);
@@ -625,7 +645,7 @@ const getLatestUnstakeTransferOfTokenFromAnAddress = async ({token_id:tokenID = 
 		// 	const collection = await db.collection.init({client: dbClient, collection: {name: db.collection.names.mutantdao}});
 			// example event
 			// {event: "Transfer", "returnValues.from":"0x35f80420bbDB358b6bf274038aeD03B49235E9fC", "returnValues.to":"0xd09656a2EE7E5Ee3404fAce234e683D3337dA014"}
-			const cursor = await collection.find({event: "Transfer", "returnValues.from":stakingWalletAddress, "returnValues.to":walletAddress}).sort({blockNumber: -1}).limit(1);
+			const cursor = await collection.find({event: "Transfer", "returnValues.from":stakingWalletAddress, "returnValues.to":walletAddress, "returnValues.tokenId":tokenID}).sort({blockNumber: -1}).limit(1);
 			while(await cursor.hasNext()){
 				transfer = await cursor.next()
 				// log.info(`${loggingTag}[count:${await cursor.count()}] event:`, sale);
